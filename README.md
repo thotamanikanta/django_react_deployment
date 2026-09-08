@@ -264,7 +264,7 @@ docker compose exec backend python manage.py createsuperuser
 On your local machine:
 ```bash
 ls ~/.ssh
-ssh-keygen -t ed25519 -C "clickmart-linode"
+ssh-keygen -t ed25519 -C "deployment-linode"
 ```
 
 Copy the public key and add it to Linode UI:
