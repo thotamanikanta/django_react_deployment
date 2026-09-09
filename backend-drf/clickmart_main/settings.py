@@ -173,3 +173,10 @@ EMAIL_HOST_USER = config('EMAIL_HOST_USER')
 EMAIL_HOST_PASSWORD = config('EMAIL_HOST_PASSWORD')
 
 CORS_ALLOWED_ORIGINS = os.getenv('CORS_ALLOWED_ORIGINS').split(",")
+
+CSRF_TRUSTED_ORIGINS = [
+    'http://172.235.19.252',
+    'https://172.235.19.252',   # include https if you’ll use SSL
+    'http://yourdomain.com',
+    'https://yourdomain.com',
+]
