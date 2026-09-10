@@ -1,0 +1,44 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    env_file:
+      - ./backend-drf/.env.production
+
+    volumes:
+      - dev_postgres_data:/var/lib/postgresql/data
+
+  backend:
+    build: ./backend-drf
+    volumes:
+      - ./backend-drf/static:/app/static
+      - ./backend-drf/media:/app/media
+    ports:
+      - "8000:8000"
+    env_file:
+      - ./backend-drf/.env.docker
+
+    depends_on:
+      - db
+    command: >
+      sh -c "python manage.py collectstatic --noinput &&
+             python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.dev
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_SERVER_BASE_URL: "http://10.0.1.207:8000/api/v1/"
+    depends_on:
+      - backend
+
+volumes:
+  dev_postgres_data:
+  dev_media:

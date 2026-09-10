@@ -1,9 +1,9 @@
 services:
   db:
     image: postgres:16-alpine
-    restart: unless-stopped
+    restart: always
     env_file:
-      - ./backend-drf/.env.production
+      - .env.production
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -13,30 +13,22 @@ services:
       retries: 5
 
   backend:
-    build:
-      context: ./backend-drf
-      dockerfile: Dockerfile
-    restart: unless-stopped
+    image: ghcr.io/thotamanikanta/django_react_deployment-backend:latest
+    restart: always
     env_file:
-      - ./backend-drf/.env.docker
+      - .env.docker
     depends_on:
       db:
         condition: service_healthy
     volumes:
       - static_volume:/app/static
       - media_volume:/app/media
-    command: >
-      sh -c "python manage.py collectstatic --noinput &&
-             python manage.py migrate --noinput &&
-             gunicorn clickmart_main.wsgi:application --bind 0.0.0.0:8000 --workers 3"
+    # Gunicorn starts immediately — no delays
+    command: gunicorn clickmart_main.wsgi:application --bind 0.0.0.0:8000 --workers 3 --timeout 180
 
   frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile
-      args:
-        VITE_SERVER_BASE_URL: "/api/v1"
-    restart: unless-stopped
+    image: ghcr.io/thotamanikanta/django_react_deployment-frontend:latest
+    restart: always
     expose:
       - "80"
     depends_on:
@@ -44,7 +36,7 @@ services:
 
   nginx:
     image: nginx:alpine
-    restart: unless-stopped
+    restart: always
     ports:
       - "80:80"
     volumes:

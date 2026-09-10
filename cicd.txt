@@ -1,0 +1,145 @@
+name: Docker CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  REGISTRY: ghcr.io
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}-frontend
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}-backend
+
+jobs:
+  # ==========================================
+  # 1. TEST JOBS
+  # ==========================================
+  test:
+    name: Run Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Test Frontend
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npm test -- --watchAll=false --passWithNoTests
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+          cache: 'pip'
+          cache-dependency-path: backend-drf/requirements.txt
+
+      - name: Test Backend
+        working-directory: ./backend-drf
+        env:
+          SECRET_KEY: 'ci-secret-for-checking'
+          DEBUG: 'False'
+        run: |
+          pip install -r requirements.txt
+          python manage.py check
+
+  # ==========================================
+  # 2. BUILD & PUSH DOCKER IMAGES (GHCR)
+  # ==========================================
+  build-and-push:
+    name: Build & Push Images
+    needs: test
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: actions/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build & Push Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend-drf
+          file: ./backend-drf/Dockerfile
+          push: true
+          tags: ${{ env.BACKEND_IMAGE }}:latest,${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build & Push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          file: ./frontend/Dockerfile
+          build-args: |
+            VITE_SERVER_BASE_URL=/api/v1
+          push: true
+          tags: ${{ env.FRONTEND_IMAGE }}:latest,${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ==========================================
+  # 3. CD DEPLOYMENT OVER SSH
+  # ==========================================
+  # ==========================================
+  # 3. ZERO-DOWNTIME CD DEPLOYMENT OVER SSH
+  # ==========================================
+  deploy:
+    name: Deploy to Server
+    needs: build-and-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SERVER_HOST }}
+          username: ${{ secrets.SERVER_USER }}
+          key: ${{ secrets.SERVER_SSH_KEY }}
+          port: ${{ secrets.SERVER_PORT || 22 }}
+          script: |
+            set -e
+            cd /root/django_react_deployment
+
+            echo "Logging into GHCR..."
+            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u "${{ secrets.GHCR_USER }}" --password-stdin
+
+            echo "Pulling latest images..."
+            docker compose -f docker-compose.prod.yml pull
+
+            echo "Running migrations in isolated runner (old app is still serving traffic)..."
+            docker compose -f docker-compose.prod.yml run --rm --no-deps backend python manage.py migrate --noinput
+
+            echo "Collecting static files..."
+            docker compose -f docker-compose.prod.yml run --rm --no-deps backend python manage.py collectstatic --noinput
+
+            echo "Swapping backend & frontend containers..."
+            docker compose -f docker-compose.prod.yml up -d --no-deps backend frontend
+
+            echo "Reloading Nginx gracefully..."
+            docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload
+
+            echo "Cleaning dangling images..."
+            docker image prune -f
+
+            echo "Zero-downtime deployment finished successfully!"
