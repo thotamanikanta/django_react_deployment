@@ -127,7 +127,7 @@ const ProductDetail = () => {
             <h4 className="alert-heading">{error || "Product Not Found"}</h4>
             <p>
               The product you're looking for doesn't exist or could not be
-              loaded.
+              loaded
             </p>
             <button className="btn btn-primary" onClick={() => navigate("/")}>
               Back to Products
